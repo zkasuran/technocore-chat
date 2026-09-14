@@ -17,10 +17,10 @@ import limit
 
 
 class _GatedOrderedDict(OrderedDict):
-    """An OrderedDict that parks one thread after get() until another thread signals it.
+    """An OrderedDict that parks one thread after __setitem__ until another thread signals it.
 
-    Used to force the exact interleaving that reproduces issue #378: thread A reads a
-    bucket, thread B evicts it, thread A tries to move_to_end the now-absent key.
+    Used to force the exact interleaving that reproduces issue #378: thread A writes a
+    bucket, thread B evicts that key, thread A tries to move_to_end the now-absent key.
     """
 
     def __init__(self):
@@ -28,8 +28,8 @@ class _GatedOrderedDict(OrderedDict):
         self.gate = threading.Event()
         self.parked = threading.Event()
 
-    def get(self, key, default=None):
-        result = super().get(key, default)
+    def __setitem__(self, key, value):
+        result = super().__setitem__(key, value)
         if threading.current_thread().name == "parked":
             self.parked.set()
             self.gate.wait(timeout=2.0)
@@ -38,9 +38,10 @@ class _GatedOrderedDict(OrderedDict):
 
 def test_concurrent_take_never_raises_keyerror(monkeypatch):
     """The KeyError path: move_to_end on a key another thread evicted between __setitem__
-    and move_to_end. Needs MAX_BUCKETS exceeded so popitem runs, and an existing key so
-    __setitem__ leaves it where it was (a new key goes to the end and cannot be evicted
-    before move_to_end runs).
+    and move_to_end. The parked thread operates on an existing key (so __setitem__ leaves
+    it in place rather than appending to the end), and the evictor thread creates a NEW key
+    that pushes the table over MAX_BUCKETS, forcing popitem to evict the parked thread's key
+    before it can move_to_end.
 
     Without the lock this raises KeyError in the parked thread. With it, both succeed.
     """
@@ -51,8 +52,13 @@ def test_concurrent_take_never_raises_keyerror(monkeypatch):
 
     monkeypatch.setattr(limit, "_buckets", gated)
 
-    class FakeRequest:
+    class FakeRequestOld:
         client = type("obj", (), {"host": "old"})()
+        scope = {}
+        headers = {}
+
+    class FakeRequestNew:
+        client = type("obj", (), {"host": "new"})()
         scope = {}
         headers = {}
 
@@ -60,13 +66,16 @@ def test_concurrent_take_never_raises_keyerror(monkeypatch):
 
     def take_parked():
         try:
-            results["parked"] = limit.take(FakeRequest(), "read", 60)
+            results["parked"] = limit.take(FakeRequestOld(), "read", 60)
         except KeyError as e:
             results["parked"] = e
 
     def take_evictor():
         if gated.parked.wait(timeout=2.0):
-            results["evictor"] = limit.take(FakeRequest(), "read", 60)
+            # Create a NEW key (new, read) that pushes the table over MAX_BUCKETS,
+            # forcing eviction of the oldest key — which is (old, read) that the
+            # parked thread is trying to move_to_end.
+            results["evictor"] = limit.take(FakeRequestNew(), "read", 60)
             gated.gate.set()
         else:
             results["evictor"] = "timeout"
