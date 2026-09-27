@@ -86,6 +86,23 @@ def test_a_refusal_never_extends_the_window() -> None:
     assert refused(LONG, now=100.0 + COPIES - 1 + WINDOW + 0.1) is False
 
 
+def test_a_copy_exactly_one_window_old_still_counts_as_live() -> None:
+    """The live filter is inclusive at its edge: `now - t <= window`, so a copy
+    exactly `window` old still counts. With COPIES copies at t = 100 .. 100+COPIES-1,
+    at now = 100 + WINDOW the oldest copy is exactly WINDOW old, so on main all COPIES
+    are live and the next copy is refused. The mutant `<=` -> `<` drops that oldest
+    copy one instant early, leaves COPIES-1 live and wrongly accepts. The window test
+    above only checks a point well past the edge, never the exact boundary."""
+    limit._dupes.clear()
+    for i in range(COPIES):
+        assert refused(LONG, now=100.0 + i) is False
+    # oldest copy (t=100) is exactly WINDOW old, still live, so COPIES are live -> refused
+    assert refused(LONG, now=100.0 + WINDOW) is True
+    # one instant later it drops out, leaving COPIES-1 live -> accepted
+    assert refused(LONG, now=100.0 + WINDOW + 0.001) is False
+    limit._dupes.clear()
+
+
 def test_the_threshold_decides_which_copy_is_the_refused_one() -> None:
     """COPIES is arithmetic, not a constant of nature: at 2 the third copy is refused.
     Pinned so a retune of the default cannot silently re-tune what this file means."""
