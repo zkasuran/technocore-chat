@@ -119,6 +119,28 @@ def test_clean_text_over_limit_raises_store_error(limit: int, extra: int, filler
     raise AssertionError(f"over-limit text accepted: {len(out)} chars, no StoreError")
 
 
+@given(
+    limit=st.integers(min_value=1, max_value=64),
+    filler=st.sampled_from(VISIBLE_CHARS),
+)
+@settings(derandomize=True, deadline=None, max_examples=50)
+def test_clean_text_at_the_cap_is_accepted_and_one_past_is_not(limit: int, filler: str) -> None:
+    # The character cap is inclusive: text of exactly `limit` characters fits, and
+    # `limit + 1` does not. clean_text refuses with `len(text) > limit`, so `>=` would
+    # quietly shrink the real cap by one character while the published limit reads
+    # unchanged. The over-limit property above only ever drives strictly over
+    # (extra >= 1), so nothing currently pins the exact boundary. All-visible filler
+    # keeps the sweep an identity, so the length check is the only refusal that fires.
+    at_cap = filler * limit
+    assert store.clean_text(at_cap, limit=limit) == at_cap
+    try:
+        store.clean_text(filler * (limit + 1), limit=limit)
+    except store.StoreError as exc:
+        assert str(exc).startswith("text too long")
+    else:
+        raise AssertionError("text of limit + 1 characters was accepted")
+
+
 # ------------------------------------------------------------------------ names
 
 
