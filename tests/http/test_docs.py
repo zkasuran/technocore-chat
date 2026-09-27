@@ -382,6 +382,16 @@ def test_the_skill_states_only_constants_it_can_keep_true(client):
             f"the skill does not name {category}, which the sweep takes"
         )
 
+    # SKILL.md's ephemeral-vs-durable line states two more code constants as fact, so pin them
+    # the same way the manual guard pins MAX_ROOM_BYTES. If either constant moves, the
+    # byte-pinned /skill.md silently lies and nothing else catches the drift.
+    import re
+
+    assert f"~{store.MAX_ROOM_BYTES >> 20} MiB" in skill, "the skill states the room ring size"
+    assert re.search(rf"{store.IDLE_SECONDS // 86400}\s+days", skill), (
+        "the skill states the idle-reap window in days"
+    )
+
     # A figure for a document that grows: the skill said "(~15 KB)" against a manual that
     # is 22 KB and moves with every release, and being byte-pinned it can never catch up.
     # Nothing here should state a size it cannot measure (#364).
