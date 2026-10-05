@@ -633,6 +633,38 @@ def test_a_replay_is_refused_while_the_record_is_in_the_window(tmp_path) -> None
         assert store.append(tmp_path, "lobby", "", "up", did=did, nonce=8)["nonce"] == 8
 
 
+def test_a_replay_is_refused_after_more_than_read_budget_of_filler(tmp_path) -> None:
+    """#466 at full size, at the store layer: the real constants, nothing shrunk.
+
+    Every other test here tunes the window down so its boundary is reachable in milliseconds.
+    This one writes past the real READ_BUDGET, because the defect was exactly that the
+    tuned-down model and the shipped scan could disagree. The HTTP tests in test_rooms.py and
+    test_notes.py pin the same thing through the lanes; this pins `_last_nonce` itself, so a
+    revert of its one argument fails here without a client in the way. Carried from #952
+    (dannybyarun), which measured and wrote it first.
+    """
+    did = DIDS[0]
+    store.append(tmp_path, "lobby", "", "the guarded message", did=did, nonce=7)
+    path = store.room_path(tmp_path, "lobby")
+
+    filler = "z" * 900
+    written = 0
+    while path.stat().st_size < store.READ_BUDGET + 100_000:
+        store.append(tmp_path, "lobby", "filler", f"noise {written} {filler}")
+        written += 1
+
+    # The precondition, asserted rather than assumed: the record is still on disk, so a replay
+    # would duplicate something the store still holds.
+    assert any(r.get("from") == did for r in _records(tmp_path, "lobby")), (
+        "the original was compacted away, so this is not the state #466 describes"
+    )
+    assert store._last_nonce(tmp_path, "lobby", did) == 7, (
+        "more than READ_BUDGET of filler buried the record and the guard stopped reaching it"
+    )
+    with pytest.raises(store.StoreError, match="not greater than 7"):
+        store.append(tmp_path, "lobby", "", "the guarded message", did=did, nonce=7)
+
+
 def test_a_replay_is_accepted_once_the_record_leaves_the_ring(tmp_path, monkeypatch) -> None:
     """The bounded half, rebounded. An intentional inversion of the window contract.
 

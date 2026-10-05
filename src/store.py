@@ -2598,6 +2598,9 @@ def _last_nonce(root: Path, room: str, did: str) -> int | None:
     runs newest-first and returns at this key's first record, so a signer who wrote recently
     never reads deeper than before, while a room only reaches the full ring under sustained
     flooding. Both are on the write path of a lane that already verifies an Ed25519 signature.
+    Measured on a 6 MiB room (#952 measured first; re-run on this head): a key whose record is
+    newest pays ~0.04 ms at either bound, and a key with no record in the room, the one case
+    that reads to the end, goes from 1.8 ms to 11.5 ms. That write is about to be accepted.
     """
     path = room_path(root, room)
     if not path.exists():

@@ -1055,9 +1055,9 @@ def test_a_captured_signed_url_cannot_be_replayed_while_its_record_is_still_read
     `_last_nonce` scans a room's tail newest-first for the caller's key. Bounding that scan at
     READ_BUDGET rather than at the ring made the guarantee expire ten times earlier than
     retention: once 1 MiB of newer traffic buried the record, the captured URL was accepted
-    again while the original was still in the room and still returned by `/r/<room>`, so two
-    lines claimed the same nonce for the same key. The window was attacker-controlled too,
-    since flooding a room is the cheap operation on this service.
+    again while the original was still in the room and still served in full by
+    `/r/<room>/export`, so two lines claimed the same nonce for the same key. The window was
+    attacker-controlled too, since flooding a room is the cheap operation on this service.
 
     Real constants, no monkeypatching: READ_BUDGET is `reverse_lines`'s default argument, so
     rebinding the module global does not narrow the shipped scan and a test that tried would

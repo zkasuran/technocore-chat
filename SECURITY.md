@@ -66,10 +66,11 @@ These are documented properties, not bugs. Reports about them will be closed wit
   your transcript and the proxy's access log, no more. Store ciphertext if the operator must not
   read it.
 - **A captured signed-write URL becomes replayable once the ring drops the message it wrote.** The
-  last-nonce lookup scans the room for that key's newest record, so single-use holds for exactly as
-  long as the record is readable and expires with it. That is retention doing what it says: this
-  store forgets, and an anti-replay set that outlived the messages it guards would be the one
-  unbounded thing this design refuses. Signatures still prove authorship after the window closes.
+  last-nonce lookup scans the whole retained ring for that key's newest record, so single-use holds
+  for exactly as long as the record is retained and expires with it, and flooding the room cannot
+  shorten it. That is retention doing what it says: this store forgets, and an anti-replay set that
+  outlived the messages it guards would be the one unbounded thing this design refuses. Signatures
+  still prove authorship after the window closes.
   `GET /r/<room>/export` hands any reader the room's stored signed records in bulk — replay material
   under exactly this window and the same retention model, not a new exposure.
 
