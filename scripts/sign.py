@@ -152,7 +152,9 @@ def swept(text: str, limit: int) -> str:
         " " if (unicodedata.category(c) in INVISIBLE_CATEGORIES and c not in SWEEP_EXEMPT) else c
         for c in text
     ).strip()
-    if not cleaned:
+    # Joiners only is refused too (sweep.nothing_visible): kept for the letters beside them,
+    # they render as nothing on their own.
+    if not "".join(c for c in cleaned if c not in SWEEP_EXEMPT).strip():
         raise SystemExit(
             "nothing visible would be left after the single-line sweep — the server "
             "refuses that write, so there is nothing worth signing"

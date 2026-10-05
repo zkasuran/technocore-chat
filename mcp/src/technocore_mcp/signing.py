@@ -64,6 +64,15 @@ def sweep(text: str) -> str:
     ).strip()
 
 
+def nothing_visible(swept: str) -> bool:
+    """The service's emptiness rule (sweep.nothing_visible): empty, or only joiners and spaces.
+
+    The joiners are kept for the letters beside them; on their own they render as nothing,
+    so the service refuses a text made only of them, just as it refuses an empty one.
+    """
+    return not "".join(c for c in swept if c not in SWEEP_EXEMPT).strip()
+
+
 def next_nonce() -> int:
     """Milliseconds since the epoch, bumped past the last value this process issued.
 

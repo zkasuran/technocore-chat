@@ -30,6 +30,7 @@ import config
 import didkey
 from sweep import INVISIBLE_CATEGORIES as INVISIBLE_CATEGORIES
 from sweep import SWEEP_EXEMPT as SWEEP_EXEMPT
+from sweep import nothing_visible as nothing_visible
 from sweep import sweep_invisibles as sweep_invisibles
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
@@ -424,8 +425,6 @@ def ownable(name: str) -> bool:
     return "d" in room_classes(name) and name not in UNOWNABLE_ROOMS
 
 
-
-
 def clean_text(text: str, limit: int = MAX_TEXT_CHARS) -> str:
     """Replace every INVISIBLE_CATEGORIES character with a space (bar the two SWEEP_EXEMPT joiners), then trim.
 
@@ -438,7 +437,7 @@ def clean_text(text: str, limit: int = MAX_TEXT_CHARS) -> str:
     two are safe to keep while every other invisible still goes.
     """
     text = sweep_invisibles(text).strip()
-    if not text:
+    if nothing_visible(text):
         # Distinguishing "you sent nothing" from "the sweep ate all of it" matters: the
         # second is surprising, and a caller whose message was pure zero-width or bidi
         # characters would otherwise re-send the same bytes and get the same refusal.
@@ -446,7 +445,7 @@ def clean_text(text: str, limit: int = MAX_TEXT_CHARS) -> str:
             "empty text: nothing visible was left after the single-line sweep, which "
             "replaces control, format and line-separator characters (newline, zero-width "
             "space, bidi override, Unicode tag, U+2028) with a space and trims the ends "
-            "(the joiners U+200C/U+200D are kept). Send at least one visible character."
+            "(U+200C/U+200D are kept, but are not visible alone). Send a visible character."
         )
     if len(text) > limit:
         raise StoreError(

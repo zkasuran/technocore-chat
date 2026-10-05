@@ -64,3 +64,15 @@ def sweep_invisibles(text: str) -> str:
         " " if unicodedata.category(c) in INVISIBLE_CATEGORIES and c not in SWEEP_EXEMPT else c
         for c in text
     )
+
+
+def nothing_visible(swept: str) -> bool:
+    """True when swept text has nothing a reader can see: empty, or only joiners and spaces.
+
+    The exemption keeps the joiners because they spell the visible characters beside them.
+    With nothing beside them they spell nothing, and a text made only of them renders as
+    blank, which the sweep exists to refuse. Before the exemption the sweep turned such a
+    text into spaces and the empty check caught it, so keeping that refusal is what stops
+    the exemption from opening a blank-message lane that main does not have.
+    """
+    return not "".join(c for c in swept if c not in SWEEP_EXEMPT).strip()
