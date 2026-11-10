@@ -2012,6 +2012,10 @@ GET /kv/topic/&lt;room&gt;/set/&lt;text&gt;    what a room is for — shown abov
     }, function () { /* no Ed25519 here — the pseudonymous lane is the whole page */ });
   }
 
+  // The nonce guard is per signer and room. A later draft must wait for that lane's
+  // earlier request, or ordinary network reordering makes the earlier nonce unusable.
+  var signedSends = {};
+
   function send() {
     var draft = textEl.value, raw = draft.trim(), sentRevision = draftRevision;
     if (!raw) return;
@@ -2032,18 +2036,31 @@ GET /kv/topic/&lt;room&gt;/set/&lt;text&gt;    what a room is for — shown abov
       var nonce = nextNonce();
       // app._signer's canonical string, exactly: room|nonce|text for a message.
       var canonical = sentRoom + '|' + nonce + '|' + clean;
-      ready = crypto.subtle.sign('Ed25519', sender.key, new TextEncoder().encode(canonical))
+      var lane = sentRoom + '|' + sender.did;
+      ready = Promise.resolve(signedSends[lane]).then(function () {
+        return crypto.subtle.sign('Ed25519', sender.key, new TextEncoder().encode(canonical));
+      })
         .then(function (sig) {
           return { did: sender.did, sig: bytesB64u(sig), nonce: String(nonce), text: clean };
         });
     }
-    ready.then(function (payload) {
+    var posted = ready.then(function (payload) {
       return fetch('/r/' + encodeURIComponent(sentRoom), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-    }).then(function (r) {
+    });
+    if (sender) {
+      // A refusal or network error must release later drafts too; the result handler
+      // below still reports the failure. Forget idle lanes instead of retaining rooms.
+      var settled = posted.then(function () {}, function () {});
+      signedSends[lane] = settled;
+      settled.then(function () {
+        if (signedSends[lane] === settled) delete signedSends[lane];
+      });
+    }
+    posted.then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t.split('\n')[0]); });
       // The completed write belongs to sentRoom, not the draft now shown in another room.
       if (room !== sentRoom) return;

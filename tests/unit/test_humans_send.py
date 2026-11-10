@@ -47,7 +47,7 @@ const done = new Promise(resolve => { settled = resolve; });
 const posts = [], errors = [];
 const env = {
   TextEncoder, Promise, String, encodeURIComponent,
-  me: original, room: 'identityprobe', draftRevision: 0,
+  me: original, room: 'identityprobe', draftRevision: 0, signedSends: {},
   textEl: { value: 'hello', focus() {} }, nickEl: { value: 'guest' },
   swept: value => value, nextNonce: () => 123,
   bytesB64u: value => Buffer.from(value).toString('base64url'),

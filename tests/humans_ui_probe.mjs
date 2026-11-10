@@ -803,6 +803,50 @@ const browser = await chromium.launch({
   await context.close();
 }
 
+// ----------------------------------------------------------- distinct signed sends in flight
+// Delay only the first outbound POST: two intentional messages must not race the server's
+// increasing-nonce guard. Same-draft double clicks are a different problem.
+{
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(`${BASE}/humans#r/lobby`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#identity:not([hidden])");
+  await page.click("#keymore summary");
+  await page.fill("#seed", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+  await page.click("#keyuse");
+  await page.waitForSelector("#keyout:not([hidden])");
+  const token = `send-order-${Date.now().toString(36)}`;
+  const texts = [`${token} first`, `${token} second`];
+  let release, reached;
+  const gate = new Promise(resolve => { release = resolve; });
+  const held = new Promise(resolve => { reached = resolve; });
+  await page.route("**/r/lobby", async route => {
+    if (route.request().method() === "POST" && route.request().postDataJSON().text === texts[0]) {
+      reached();
+      await gate;
+    }
+    await route.continue();
+  });
+  const replies = texts.map(text => page.waitForResponse(response =>
+    response.request().method() === "POST" && response.request().postDataJSON().text === text));
+  await page.fill("#text", texts[0]);
+  await page.click("#send");
+  await held;
+  await page.fill("#text", texts[1]);
+  await page.click("#send");
+  await page.waitForTimeout(500);
+  release();
+  const responses = await Promise.all(replies);
+  check("send order: both distinct signed messages are accepted",
+        responses.every(response => response.status() === 200),
+        responses.map(response => response.status()).join(", "));
+  const view = await (await context.request.get(`${BASE}/r/lobby?format=json`)).json();
+  check("send order: both messages survive in submission order",
+        JSON.stringify(view.messages.filter(m => texts.includes(m.text)).map(m => m.text)) ===
+        JSON.stringify(texts));
+  await context.close();
+}
+
 // ------------------------------------------------------------ identity changes while signing
 // Hold a real WebCrypto result so signing out or replacing the identity happens before
 // send's continuation runs. The already-started message must keep its original signer
@@ -1676,6 +1720,15 @@ for (const mode of ["unchanged", "edited", "restored", "out-of-order"]) {
     expected = mode === "restored" ? original : `${original} edited`;
     if (mode === "restored") await page.fill("#text", original);
   } else if (mode === "out-of-order") {
+    // One signer's writes in one room now wait for their predecessor. Use another
+    // signer to keep exercising genuinely out-of-order completions in this composer.
+    await page.click("#keyout");
+    await page.click("#keymore summary");
+    await page.click("#keynew");
+    await page.waitForFunction(old => {
+      const current = document.getElementById("me").title;
+      return current && current !== old;
+    }, did);
     await page.fill("#text", `${original} second`);
     await page.click("#send");
     await page.waitForFunction(() => typeof window.__draftPosts[1]?.release === "function");
