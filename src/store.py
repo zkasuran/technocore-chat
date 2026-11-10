@@ -691,6 +691,10 @@ def _replace(path: Path, data: bytes, fsync: bool = False) -> None:
     and landed 0644 under the default umask, so the mode is restored explicitly rather than
     quietly narrowed under anything else that reads the store — rooms included, now that a
     compacted `*.jsonl` is staged here too.
+
+    Exception cleanup cannot run after SIGKILL or a host crash. The orphan sweep reclaims
+    unpublished `.tmp` files after IDLE_SECONDS without a write; otherwise each interrupted
+    replacement permanently adds bytes outside both the room and note budgets.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
@@ -1720,9 +1724,14 @@ def _split_seq_state(root: Path) -> None:
 
 
 def _sweep_orphan_locks(root: Path, now: float, touched: dict[str, set[str]]) -> None:
-    """Unlink sidecar locks whose data file is gone and that have been idle as long as any
-    reaped room. `now` is the caller's, so every reapability decision in one pass is made
-    against one instant rather than a clock that moves through it.
+    """Unlink idle orphan sidecars and unpublished atomic-replacement staging files.
+    `now` is the caller's, so every reapability decision in one pass is made against one
+    instant rather than a clock that moves through it.
+
+    Staging names are unique per writer, so an interrupted write leaves a file no later
+    writer will reuse. Sweep from the root once: counts and snapshots stage there, outside
+    both data trees. A staging file idle for IDLE_SECONDS may be discarded even if its
+    writer is paused; that write then fails to publish, leaving the acknowledged value intact.
 
     Records what it emptied into `touched`, beside what the reap loop deleted, because a
     swept lock is usually the last thing standing between a namespace or a bucket and being
@@ -1737,27 +1746,29 @@ def _sweep_orphan_locks(root: Path, now: float, touched: dict[str, set[str]]) ->
     writer recreating that room from having its lock unlinked underneath it. The drift is
     bounded by the room cap: at most a week of churn in empty files.
     """
-    for sub, suffix in (("rooms", ".jsonl.lock"), ("notes", ".txt.lock")):
-        base = f"{root / sub}{os.sep}"
-        for entry in _walk(root / sub, suffix):
-            try:
-                # Slicing `.lock` off the name is `Path.with_suffix("")` without the Path,
-                # and os.access is `.exists()` without the stat_result it throws away: 26.0
-                # µs per lock as it was, 3.6 µs now, over 12,079 room locks. os.access asks
-                # about the real uid rather than the effective one — this image runs as one
-                # non-root uid so the two agree, and nothing here is setuid.
-                #
-                # Deliberately not the dir_fd form: os.stat(name, dir_fd=) measures 96.6 ms
-                # against os.stat(path)'s 94.6 ms over the same tree, so threading a
-                # directory fd out of the walk would buy a rounding error and cost an fd
-                # lifetime per namespace. The Path was the expense, not the syscall.
-                data = entry.path[: -len(".lock")]
-                if os.access(data, os.F_OK) or now - entry.stat().st_mtime <= IDLE_SECONDS:
-                    continue
-                os.unlink(entry.path)
-                touched[sub].add(_emptied(base, entry.path, sub == "notes"))
-            except OSError:
+    for entry in _walk(root, (".jsonl.lock", ".txt.lock", ".tmp")):
+        try:
+            # Only a sidecar guards a data path. An unpublished stage can be reclaimed
+            # even when its destination still holds the previous acknowledged value.
+            # Slicing `.lock` off the name is `Path.with_suffix("")` without the Path,
+            # and os.access is `.exists()` without the stat_result it throws away: 26.0
+            # µs per lock as it was, 3.6 µs now, over 12,079 room locks. os.access asks
+            # about the real uid rather than the effective one — this image runs as one
+            # non-root uid so the two agree, and nothing here is setuid.
+            #
+            # Deliberately not the dir_fd form: os.stat(name, dir_fd=) measures 96.6 ms
+            # against os.stat(path)'s 94.6 ms over the same tree, so threading a
+            # directory fd out of the walk would buy a rounding error and cost an fd
+            # lifetime per namespace. The Path was the expense, not the syscall.
+            data = entry.path[: -len(".lock")] if entry.name.endswith(".lock") else ""
+            if os.access(data, os.F_OK) or now - entry.stat().st_mtime <= IDLE_SECONDS:
                 continue
+            os.unlink(entry.path)
+            sub = Path(entry.path).relative_to(root).parts[0]
+            if sub in touched:
+                touched[sub].add(_emptied(f"{root / sub}{os.sep}", entry.path, sub == "notes"))
+        except OSError:
+            continue
 
 
 def _drop_emptied_namespaces(
@@ -2127,8 +2138,8 @@ def _scan(d: Path | str, suffix: str, sized: bool = False) -> tuple[int, int]:
     return count, size
 
 
-def _walk(d: Path | str, suffix: str) -> Iterator[os.DirEntry[str]]:
-    """Every `*suffix` file anywhere under `d`, at any depth.
+def _walk(d: Path | str, suffix: str | tuple[str, ...]) -> Iterator[os.DirEntry[str]]:
+    """Every file matching a suffix anywhere under `d`, at any depth.
 
     Yields the `os.DirEntry` scandir already built rather than a Path made from it. On 3.12
     pathlib is lazily normalised — the constructor stashes the string and the parse lands on

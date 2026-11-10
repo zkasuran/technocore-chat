@@ -675,7 +675,7 @@ def test_a_reap_cannot_remove_a_namespace_a_create_is_entering(tmp_path, monkeyp
     def walk_but_let_a_create_into_the_window_first(d, suffix):
         # The sweep of orphan note locks: the count walk is done and its gate given back,
         # and the rmdir is next. The only point in the pass where this race is reachable.
-        if suffix == ".txt.lock" and not creator:
+        if ".txt.lock" in suffix and not creator:
             creator.append(threading.Thread(target=create))
             creator[0].start()
             at_the_window.wait(5)
@@ -878,7 +878,7 @@ def test_a_create_the_walk_could_not_see_leaves_the_count_at_or_above_the_disk(
     creator = []
 
     def walk_but_let_a_create_land_after_the_walks(d, suffix):
-        if suffix == ".txt.lock" and not creator:
+        if ".txt.lock" in suffix and not creator:
             creator.append(
                 threading.Thread(target=store.note_set, args=(tmp_path, "ns", "unseen", "v"))
             )
@@ -1088,7 +1088,7 @@ def test_a_count_that_was_already_low_before_the_walk_is_dropped(tmp_path, monke
     landed = []
 
     def walk_but_land_a_create_once_the_notes_are_walked(d, suffix):
-        if suffix == ".txt.lock" and not landed:
+        if ".txt.lock" in suffix and not landed:
             landed.append(suffix)
             store.note_set(tmp_path, "ns", "c", "v")  # +1 to the file, +1 to the disk
         return real_walk(d, suffix)
